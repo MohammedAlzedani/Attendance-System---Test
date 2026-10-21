@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+   
+  <meta charset="UTF-8" />
+   
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>نظام الحضور والغياب (تلقائي ومحلي)</title>
+   
+  <script src="https://cdn.tailwindcss.com"></script>
+   
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&display=swap');
+
+    body {
+      font-family: 'Cairo', sans-serif;
+      background: #f3f6fb;
+    }
+
+    .card {
+      background: white;
+      border-radius: 18px;
+      padding: 28px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, .08);
+      border: 1px solid #e6e9ef;
+    }
+
+    .input-box {
+      border: 1px solid #d9dce3;
+      border-radius: 10px;
+      padding: 10px 14px;
+    }
+
+    #reader {
+      min-height: 240px;
+      border: 2px dashed #a5b4fc;
+      border-radius: 14px;
+      background: #eef2ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+    }
+
+    .result-box {
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+    }
+  </style>
+</head>
+
+<body class="p-5 md:p-10">
+    <div class="max-w-xl mx-auto">
+
+        <h2 class="text-3xl font-bold text-center text-gray-800 mb-8">
+            🕒 نظام الحضور والغياب
+          </h2>
+
+        <div id="loginScreen" class="card" style="display:none;">
+              <h3 class="text-xl font-semibold mb-6">تسجيل الدخول</h3>
+              <input id="loginUsername" class="w-full input-box mb-4" placeholder="اسم الموظف" />
+              <input id="loginPassword" class="w-full input-box mb-4" type="password" placeholder="كلمة السر" />
+              <button id="loginButton" class="w-full bg-indigo-600 text-white py-2 rounded-lg">دخول</button>
+              <div id="loginError" class="mt-3 text-red-600 text-sm" style="display:none;"></div>
+          </div>
+
+        <div id="attendanceApp" style="display:none;">
+              <div class="card mb-7">
+                <div id="employeeWelcome" class="text-xl font-semibold text-center">
+                  </div>
+                 
+              </div>
+
+              <div class="card">
+                    <h3 class="text-xl font-semibold mb-4">مسح الباركود</h3>
+                    <div id="reader">جارٍ تشغيل الكاميرا...</div>
+
+                    <div class="space-y-3 text-sm mt-4">
+                          <div id="scanResult" class="result-box bg-blue-50">نتيجة المسح تظهر هنا</div>
+                          <div id="locationOutput" class="result-box bg-green-50">الموقع يظهر هنا</div>
+                          <div id="serverOutput" class="result-box bg-gray-50">النتيجة</div>
+                        </div>
+
+                  </div>
+          </div>
+
+      </div>
+
+   
+  <script>
+    const EMPLOYEE_NAME_KEY = 'attendance_employee_name';
+    const DEVICE_ID_KEY = 'attendance_device_id';
+    const CORRECT_PASSWORD = "Mohammed1993";
+
+    let html5QrCode;
+    let currentEmployeeName = "";
+    let currentDeviceId = "";
+    let isProcessing = false;
+
+    // 🔊 صوت نجاح
+    const successSound = new Audio("https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg");
+
+    // 🆕 دالة توليد معرف فريد بسيط
+    function generateUniqueId() {
+      return 'DEV-' + Math.random().toString(36).substring(2, 9) + Date.now().toString().substring(9);
+    }
+
+    function showView(v) {
+      loginScreen.style.display = "none";
+      attendanceApp.style.display = "none";
+      (v === "login" ? loginScreen : attendanceApp).style.display = "block";
+    }
+
+    function showLoginError(msg) {
+      loginError.textContent = msg;
+      loginError.style.display = "block";
+    }
+
+    // تسجيل الدخول
+    function handleLogin() {
+      const u = loginUsername.value.trim();
+      const p = loginPassword.value.trim();
+      loginError.style.display = "none";
+
+      if (!u || !p) return showLoginError("أدخل البيانات");
+
+      if (p === CORRECT_PASSWORD) {
+        localStorage.setItem(EMPLOYEE_NAME_KEY, u);
+        currentEmployeeName = u;
+
+        employeeWelcome.textContent = `👋 Welcome ${u}`;
+
+        let storedDeviceId = localStorage.getItem(DEVICE_ID_KEY);
+        if (!storedDeviceId) {
+          storedDeviceId = generateUniqueId();
+          localStorage.setItem(DEVICE_ID_KEY, storedDeviceId);
+        }
+        currentDeviceId = storedDeviceId;
+
+        showView("form");
+        setTimeout(initScanner, 500);
+      } else showLoginError("كلمة المرور غير صحيحة");
+    }
+
+    // تسجيل الخروج
+    function handleLogout() {
+      if (html5QrCode) html5QrCode.stop().catch(() => { });
+      localStorage.removeItem(EMPLOYEE_NAME_KEY);
+      currentEmployeeName = "";
+      showView("login");
+    }
+
+    // رسالة
+    function showMessage(type, msg) {
+      let iconText = type === "success" ? "✅" : type === "warning" ? "⚠️" : "❌";
+      serverOutput.innerHTML = `${iconText} ${msg}`;
+
+      // عرض تنبيه SweetAlert2 فقط لرسائل النجاح والخطأ النهائية
+      if (type === "success" || type === "error") {
+        Swal.fire({
+          icon: type,
+          title: type === "success" ? 'تم بنجاح' : 'خطأ!',
+          html: msg,
+          confirmButtonText: 'حسناً',
+          timer: 5000
+        });
+      }
+    }
+
+    // ✅ السكانر
+    function onScanSuccess(txt) {
+      if (isProcessing) return;
+      isProcessing = true;
+      successSound.play().catch(() => { });
+      scanResult.innerHTML = `✅ تم المسح: ${txt}`;
+      html5QrCode.stop().then(() => processAttendance(txt)).catch(() => processAttendance(txt));
+    }
+
+    function initScanner() {
+      html5QrCode = new Html5Qrcode("reader");
+      html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess)
+        .catch(() => showMessage('error', 'فشل تشغيل الكاميرا'));
+    }
+
+    function restartScanner() {
+      if (!currentEmployeeName || !html5QrCode) return;
+      setTimeout(() => initScanner(), 1200);
+    }
+
+    // 📍 GPS
+    function getLocation(cb) {
+      if (!navigator.geolocation) return cb({ error: true, message: "الموقع غير مدعوم" });
+      navigator.geolocation.getCurrentPosition(p => {
+        cb({ lat: p.coords.latitude, lon: p.coords.longitude });
+      }, () => cb({ error: true, message: "فعّل GPS" }));
+    }
+
+    // 🔄 المعالجة - 🚨 تم تعديل هذه الدالة لإظهار السبينر أولاً
+    function processAttendance(site) {
+
+      // 1. إظهار مؤشر التحميل (السبينر) فوراً بعد المسح
+      Swal.fire({
+        title: 'جارٍ تحديد الموقع وإرسال البيانات',
+        text: 'يرجى عدم مغادرة الشاشة...',
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        didOpen: () => {
+          Swal.showLoading()
+        }
+      });
+
+      showMessage('warning', 'جارٍ تحديد الموقع وإرسال البيانات...');
+
+      getLocation(loc => {
+        if (loc.error) {
+          // إغلاق السبينر عند وجود خطأ في الموقع
+          Swal.close();
+          showMessage('error', loc.message);
+          isProcessing = false;
+          restartScanner();
+          return;
+        }
+        locationOutput.innerHTML = `📍 ${loc.lat}, ${loc.lon}`;
+
+        // 2. الآن يتم استدعاء دالة الإرسال
+        sendAttendance(site, loc.lat, loc.lon);
+      });
+    }
+
+    // 📡 إرسال البيانات - 🚨 تم تعديل هذه الدالة لإزالة أمر إظهار السبينر
+    function sendAttendance(site, lat, lon) {
+      // ❌ تم إزالة كود Swal.fire() من هنا
+
+      fetch("https://script.google.com/macros/s/AKfycbxm620_IxUDWuIqzXu359I7cuQmLVqwQ_ILv0uG5QtQMR6c-d3XyR6Ov0hRzoO7mPyi/exec", {
+        method: "POST",
+        body: JSON.stringify({
+          employeeName: currentEmployeeName,
+          siteName: site,
+          timestamp: new Date().toISOString(),
+          latitude: lat,
+          longitude: lon,
+          deviceId: currentDeviceId
+        })
+      })
+        .then(r => r.json()).then(r => {
+          isProcessing = false;
+          restartScanner();
+          // إغلاق مؤشر التحميل
+          Swal.close();
+
+          if (r.result === "success") {
+            showMessage('success', `
+                <p style="text-align: right;">تمت العملية بنجاح. الإجراء: <strong>${r.action}</strong></p>
+                <p style="text-align: right;">المسافة من الموقع: <strong>${Math.round(r.distance)}م</strong></p>
+                ${r.hours ? '<p style="text-align: right;">ساعات العمل: <strong>' + r.hours + '</strong></p>' : ''}
+            `);
+          } else {
+            showMessage('error', r.message || "فشل إرسال البيانات");
+          }
+        }).catch(() => {
+          isProcessing = false;
+          restartScanner();
+          // إغلاق مؤشر التحميل
+          Swal.close();
+          showMessage('error', 'خطأ اتصال بالخادم. يرجى التحقق من اتصال الإنترنت لديك.');
+        });
+    }
+
+    // bootstrap
+    document.addEventListener('DOMContentLoaded', () => {
+      currentEmployeeName = localStorage.getItem(EMPLOYEE_NAME_KEY);
+      currentDeviceId = localStorage.getItem(DEVICE_ID_KEY) || "";
+
+      const employeeWelcome = document.getElementById('employeeWelcome');
+
+      if (currentEmployeeName && currentDeviceId) {
+        employeeWelcome.textContent = `👋 Welcome ${currentEmployeeName}`;
+
+        showView("form");
+        setTimeout(initScanner, 500);
+      } else showView("login");
+
+      loginButton.onclick = handleLogin;
+      logoutButton.onclick = handleLogout;
+    });
+  </script>
+</body>
+
+</html>

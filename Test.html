@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>نظام الحضور والغياب</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&display=swap');
+  body {
+    font-family: 'Cairo', sans-serif;
+    background: #f3f6fb;
+  }
+  .card {
+    background: white;
+    border-radius: 18px;
+    padding: 28px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    border: 1px solid #e6e9ef;
+  }
+  .input-box {
+    border: 1px solid #d9dce3;
+    border-radius: 10px;
+    padding: 10px 14px;
+    transition: 0.2s;
+  }
+  .input-box:focus {
+    border-color: #6366f1;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+  }
+  #reader {
+    min-height: 240px;
+    border: 2px dashed #c8d0dd;
+    border-radius: 14px;
+    background: #f1f5fb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    font-weight: 600;
+  }
+  .result-box {
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+  }
+</style>
+<script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+<body class="p-5 md:p-10">
+
+<div class="max-w-xl mx-auto">
+
+  <h2 class="text-3xl font-bold text-center text-gray-800 mb-8 select-none">
+    <span class="text-pink-500 ml-2">📌</span>
+    نظام الحضور والغياب
+    <div class="w-32 mx-auto mt-3 border-b-2 border-indigo-300"></div>
+  </h2>
+
+  <div class="card mb-7">
+    <label class="font-semibold text-gray-700 mb-2 block">اسم الموظف:</label>
+    <input id="employeeName" class="w-full input-box" placeholder="أدخل اسمك هنا" />
+
+    <div style="margin-top: 25px;">
+      <label class="font-semibold text-gray-700 mt-4 mb-2 block">نوع العملية:</label>
+      <select id="checkType" class="w-full input-box bg-white">
+        <option value="Check-in">حضور (Check-in)</option>
+        <option value="Check-out">انصراف (Check-out)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="text-xl font-semibold text-gray-800 mb-4 select-none">مسح الباركود</h3>
+
+    <div id="reader" class="mb-5">جارٍ تجهيز الكاميرا…</div>
+
+    <div class="space-y-3 text-sm">
+
+      <div id="scanResult" class="result-box bg-blue-50 text-blue-700 border-r-4 border-blue-500">
+        <span>🔗</span> <span>نتيجة المسح ستظهر هنا</span>
+      </div>
+
+      <div id="locationOutput" class="result-box bg-green-50 text-green-700 border-r-4 border-green-500">
+        <span>📍</span> <span>الموقع سيظهر هنا</span>
+      </div>
+
+      <div id="serverOutput" class="result-box bg-gray-50 text-gray-700 border-r-4 border-gray-500 whitespace-pre-wrap">
+        <span>ℹ️</span> <span>النتيجة </span>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+let isProcessing = false;
+
+// ===== عرض الرسائل =====
+function showMessage(type, message) {
+    const outputElement = document.getElementById("serverOutput");
+    let baseClass = "result-box border-r-4 whitespace-pre-wrap";
+    let icon = '';
+
+    if (type === 'success') {
+        outputElement.className = `${baseClass} bg-green-100 text-green-800 border-green-600`;
+        icon = '✅';
+    } else if (type === 'warning') {
+        outputElement.className = `${baseClass} bg-yellow-100 text-yellow-800 border-yellow-600`;
+        icon = '⚠️';
+    } else {
+        outputElement.className = `${baseClass} bg-red-100 text-red-800 border-red-600`;
+        icon = '❌';
+    }
+
+    outputElement.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+}
+
+// ===== QR Scanner =====
+var html5QrCode = new Html5Qrcode("reader");
+
+function onScanSuccess(decodedText) {
+  if (isProcessing) return;
+  isProcessing = true;
+
+  document.getElementById("scanResult").innerHTML =
+    `<span>🔍</span> <span>تم المسح بنجاح: ${decodedText} (جاري الإرسال...)</span>`;
+
+  html5QrCode.stop().then(() => processAttendance(decodedText));
+}
+
+function restartScanner() {
+  setTimeout(() => {
+    html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess)
+    .catch(() => showMessage('error','⚠️ فشل إعادة تشغيل الكاميرا'));
+  }, 800);
+}
+
+html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess)
+  .catch(() => showMessage('error', '⚠️ فشل تشغيل الكاميرا'));  
+
+// ===== GPS ONLY (بدون IP أو موقع افتراضي) =====
+function getLocationWithFallback(callback) {
+  if (!("geolocation" in navigator)) {
+    callback({
+      error: true,
+      message: "المتصفح لا يدعم GPS"
+    });
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      callback({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        source: "GPS"
+      });
+    },
+    err => {
+      callback({
+        error: true,
+        message: "تعذر الحصول على الموقع عبر GPS. يرجى تفعيل الموقع في الجهاز."
+      });
+    },
+    { timeout: 10000, enableHighAccuracy: true }
+  );
+}
+
+// ===== المعالجة الرئيسية =====
+function processAttendance(siteNameFromQR) {
+  let employeeName = document.getElementById("employeeName").value.trim();
+  let checkType = document.getElementById("checkType").value;
+
+  if (!employeeName) {
+    showMessage('warning', '⚠ يرجى إدخال اسم الموظف قبل المسح.');
+    isProcessing = false;
+    restartScanner();
+    return;
+  }
+
+  showMessage('warning', '... جاري إرسال البيانات والتحقق من الموقع');
+
+  getLocationWithFallback(function(loc) {
+
+    if (loc.error) {
+      showMessage('error', loc.message);
+      isProcessing = false;
+      restartScanner();
+      return;
+    }
+
+    document.getElementById("locationOutput").innerHTML =
+      `<span>📍</span> <span>الموقع: ${loc.latitude}, ${loc.longitude} (GPS)</span>`;
+
+    sendAttendance(employeeName, siteNameFromQR, checkType, loc.latitude, loc.longitude);
+  });
+}
+
+// ===== إرسال البيانات =====
+function sendAttendance(employeeName, siteName, checkType, userLat, userLon) {
+  fetch("https://script.google.com/macros/s/AKfycbyiiDTOSUf8Hx9scY_vKkoaoXBmpq52wBaWF7iSWApJBrdLTygOMkaGrp0WyyuYKlFl/exec", {
+    method: "POST",
+    body: JSON.stringify({
+      employeeName,
+      siteName,
+      checkType,
+      timestamp: new Date().toLocaleString("sv-SE"),
+      latitude: userLat,
+      longitude: userLon
+    })
+  })
+  .then(res => res.json())
+  .then(resObj => {
+    isProcessing = false;
+    restartScanner();
+
+    if (!resObj || resObj.result === undefined) {
+      showMessage('error', 'خطأ في الرد من السيرفر');
+      return;
+    }
+
+    if (resObj.result === "success") {
+      showMessage('success', `تم تسجيل العملية بنجاح | ${checkType} | المسافة: ${Math.round(resObj.distance)} متر`);
+    } else {
+      showMessage('error', `فشلت العملية: ${resObj.message}`);
+    }
+  })
+  .catch(err => {
+    isProcessing = false;
+    restartScanner();
+    showMessage('error', `خطأ بالاتصال: ${err}`);
+  });
+}
+</script>
+
+</body>
+</html>
