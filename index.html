@@ -10,8 +10,8 @@
    
   <script src="https://cdn.tailwindcss.com"></script>
    
-  <script src="https://unpkg.com/html5-qrcode"></script>
-
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <style>
@@ -185,11 +185,43 @@
       html5QrCode.stop().then(() => processAttendance(txt)).catch(() => processAttendance(txt));
     }
 
-    function initScanner() {
-      html5QrCode = new Html5Qrcode("reader");
-      html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, onScanSuccess)
-        .catch(() => showMessage('error', 'فشل تشغيل الكاميرا'));
+   function initScanner() {
+  const reader = document.getElementById("reader");
+
+  if (html5QrCode) {
+    html5QrCode.clear().catch(() => {});
+  }
+
+  html5QrCode = new Html5Qrcode("reader");
+
+  const config = {
+    fps: 10,
+    qrbox: (width, height) => {
+      const size = Math.floor(
+        Math.min(width, height) * 0.7
+      );
+
+      return {
+        width: size,
+        height: size
+      };
     }
+  };
+
+  html5QrCode.start(
+    { facingMode: "environment" },
+    config,
+    onScanSuccess,
+    () => {}
+  ).catch(error => {
+    console.error("QR scanner error:", error);
+
+    showMessage(
+      "error",
+      "تعذر تشغيل قارئ الباركود. أغلقي الصفحة وافتحيها مجددًا."
+    );
+  });
+}
 
     function restartScanner() {
       if (!currentEmployeeName || !html5QrCode) return;
